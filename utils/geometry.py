@@ -90,6 +90,30 @@ def perspective_projection(points, rotation, translation,
 
     return projected_points[:, :, :-1]
 
+def get_3D_bbox(points,rotation,translation,focal_length,camera_center,bbox_2d):
+    """
+    This function compute the 3D bounding box of the human
+    Input:
+        points (bs, N, 3): 3D points
+        rotation (bs, 3, 3): Camera rotation
+        translation (bs, 3): Camera translation
+        focal_length (bs,) or scalar: Focal length
+        camera_center (bs, 2): Camera center
+        bbox_2d (bs,4): x,y,w,h
+    Return:
+        bbox_3d (bs,6): x,y,z,w,h,d
+    """
+    # Transform points
+    points = torch.einsum('bij,bkj->bki', rotation, points)
+    points = points + translation.unsqueeze(1)
+    
+    xyz_old = torch.min(points,1)[0] #(bs,3)
+    xyz = torch.min(points,1)[0] #(bs,3)
+    whd = torch.max(points,1)[0] - torch.min(points,1)[0] #(bs,3)
+    xyz[:,0] += (bbox_2d[:,0]+0.5*bbox_2d[:,2])*translation[:,2]/focal_length # pixel * Z / f
+    xyz[:,1] += (bbox_2d[:,1]+0.5*bbox_2d[:,3])*translation[:,2]/focal_length # pixel * Z / f
+
+    return torch.cat([xyz,whd],dim=1)
 
 def estimate_translation_np(S, joints_2d, joints_conf, focal_length=5000, img_size=224):
     """Find camera translation that brings 3D joints S closest to 2D the corresponding joints_2d.

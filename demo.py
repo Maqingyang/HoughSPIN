@@ -32,7 +32,7 @@ import argparse
 import json
 
 from models import hmr, SMPL
-from utils.imutils import crop
+from utils.imutils import crop, uncrop
 from utils.renderer import Renderer
 import config
 import constants
@@ -78,6 +78,7 @@ def process_image(img_file, bbox_file, openpose_file, input_res=224):
     """
     normalize_img = Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
     img = cv2.imread(img_file)[:,:,::-1].copy() # PyTorch does not support negative stride at the moment
+    # img (H,W,RGB)
     if bbox_file is None and openpose_file is None:
         # Assume that the person is centerered in the image
         height = img.shape[0]
@@ -92,6 +93,7 @@ def process_image(img_file, bbox_file, openpose_file, input_res=224):
     img = crop(img, center, scale, (input_res, input_res))
     img = img.astype(np.float32) / 255.
     img = torch.from_numpy(img).permute(2,0,1)
+    # img(RGB,H,W)
     norm_img = normalize_img(img.clone())[None]
     return img, norm_img
 
@@ -131,7 +133,12 @@ if __name__ == '__main__':
     
     # Render parametric shape
     img_shape = renderer(pred_vertices, camera_translation, img)
-    
+    orig_img = cv2.imread(args.img)[:,:,::-1].copy() # (H,W,RGB)
+    if args.bbox is not None:
+        center, scale = bbox_from_json(args.bbox)
+    elif args.openpose is not None:
+        center, scale = bbox_from_openpose(args.openpose)
+    img_orig_shape = uncrop(img_shape,center,scale,orig_img.shape)
     # Render side views
     aroundy = cv2.Rodrigues(np.array([0, np.radians(90.), 0]))[0]
     center = pred_vertices.mean(axis=0)
@@ -145,3 +152,4 @@ if __name__ == '__main__':
     # Save reconstructions
     cv2.imwrite(outfile + '_shape.png', 255 * img_shape[:,:,::-1])
     cv2.imwrite(outfile + '_shape_side.png', 255 * img_shape_side[:,:,::-1])
+    cv2.imwrite(outfile + '_shape_orig.png', img_orig_shape[:,:,::-1])

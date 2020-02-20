@@ -6,8 +6,8 @@ Things you need to change: *_ROOT that indicate the path to each dataset
 from os.path import join
 
 H36M_ROOT = ''
-LSP_ROOT = ''
-LSP_ORIGINAL_ROOT = ''
+LSP_ROOT = '/dataset/lsp'
+LSP_ORIGINAL_ROOT = '/dataset/lsp_orig'
 LSPET_ROOT = ''
 MPII_ROOT = ''
 COCO_ROOT = ''
