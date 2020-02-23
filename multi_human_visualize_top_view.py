@@ -11,7 +11,7 @@ from utils.geometry import batch_rodrigues, perspective_projection, estimate_tra
 
 from models import hmr, SMPL
 from utils.imutils import crop
-from utils.renderer_multiple import Renderer
+from utils.renderer_multiple_top_view import Renderer
 import config
 import constants
 

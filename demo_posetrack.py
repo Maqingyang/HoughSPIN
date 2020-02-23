@@ -161,7 +161,7 @@ if __name__ == '__main__':
     checkpoint_file = "data/model_checkpoint.pt"
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     dataset_root = "/project/lighttrack/data/Data_2018/posetrack_data"
-    detections_openSVAI_folder = osp.join("/project/lighttrack/DeformConv_FPN_RCNN_detect")
+    detections_openSVAI_folder = osp.join("/project/lighttrack/DeformConv_FPN_RCNN_detect_CPN_format_with2Dkps")
     det_file_paths = get_immediate_childfile_paths(detections_openSVAI_folder)
 
     batch_size = 1
@@ -188,7 +188,7 @@ if __name__ == '__main__':
 
     # per det_file_path is an video
     for video_idx, det_file_path in tqdm(enumerate(det_file_paths)):
-        precomputed_dets = load_gt_dets_mot(det_file_path) # Get frames
+        precomputed_dets = load_det_from_CPNformat(det_file_path) # Get frames
         num_imgs = len(precomputed_dets)
         img_id = -1
         while img_id < num_imgs-1:
@@ -253,9 +253,9 @@ if __name__ == '__main__':
 
 
 
-        if 'DeformConv_FPN_RCNN_detect' not in det_file_path:
+        if 'DeformConv_FPN_RCNN_detect_CPN_format_with2Dkps' not in det_file_path:
             raise Exception("Replace exception!")
-        write_json_to_file(precomputed_dets,det_file_path.replace('DeformConv_FPN_RCNN_detect','DeformConv_FPN_RCNN_detect_CPN_format'))
+        write_json_to_file(precomputed_dets,det_file_path.replace('DeformConv_FPN_RCNN_detect_CPN_format_with2Dkps','DeformConv_FPN_RCNN_detect_CPN_format_with2Dkps_FL5000'))
             
 
     

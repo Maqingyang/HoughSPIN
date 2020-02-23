@@ -23,8 +23,11 @@ class Renderer:
         # self.camera_center = [500, 500]
         self.faces = faces
 
-        self.renderer = pyrender.OffscreenRenderer(viewport_width=W,
-                            viewport_height=H,
+        # self.renderer = pyrender.OffscreenRenderer(viewport_width=W,
+        #                     viewport_height=H,
+        #                     point_size=1.0)
+        self.renderer = pyrender.OffscreenRenderer(viewport_width=2000,
+                            viewport_height=2000,
                             point_size=1.0)
 
     def __call__(self, verts, image, mesh_trans, rotate_theta=0):
@@ -45,12 +48,27 @@ class Renderer:
                             ambient_light=(0.5, 0.5, 0.5))
         # Create camera. Camera will always be at [0,0,0]
         camera_pose = np.eye(4)     
+        if True:
+            half_depth = (mesh_trans[:,2].max() + mesh_trans[:,2].min())/2.
+            half_point = np.array([0,0,-half_depth])
+            R = np.zeros((3,3))
+            R[0,0] = 1
+            R[1,1] = np.cos(rotate_theta)
+            R[1,2] = np.sin(rotate_theta)
+            R[2,1] = -np.sin(rotate_theta)
+            R[2,2] = np.cos(rotate_theta)
+            T = np.array([0,
+                          half_depth*np.sin(rotate_theta),
+                          -half_depth*(1-np.cos(rotate_theta)),
+                        ])
+            camera_pose[:3,:3] = R
+            camera_pose[:3, 3] = T
 
 
-
+        # camera = pyrender.camera.IntrinsicsCamera(fx=self.focal_length, fy=self.focal_length,
+        #                                         cx=camera_center[0], cy=camera_center[1])
         camera = pyrender.camera.IntrinsicsCamera(fx=self.focal_length, fy=self.focal_length,
-                                                cx=camera_center[0], cy=camera_center[1])
-
+                                                cx=1000, cy=1000)
         scene.add(camera, pose=camera_pose)
 
         rot = trimesh.transformations.rotation_matrix(
@@ -82,6 +100,7 @@ class Renderer:
         light_pose[:3, 3] = np.array([1, 1, 2])
         scene.add(light, pose=light_pose)
 
+        image = np.ones((2000,2000,3))
         color, rend_depth = self.renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
         color = color.astype(np.float32) / 255.0
         valid_mask = (rend_depth > 0)[:,:,None]

@@ -38,7 +38,7 @@ def load_det_from_CPNformat(json_folder_input_path):
     # print("Using detection threshold: ", args.bbox_thresh)
     # dets = standard_to_dicts(dets_standard, bbox_thresh = args.bbox_thresh)
 
-    print("Number of imgs: {}".format(len(dets_CPNformat)))
+    # print("Number of imgs: {}".format(len(dets_CPNformat)))
     return dets_CPNformat
 
 def batch_read_json(json_folder_path):

@@ -30,20 +30,16 @@ import numpy as np
 import cv2
 import argparse
 import json
-from tqdm import tqdm
 
 from models import hmr, SMPL
-from utils.imutils import crop
+from utils.imutils import crop, uncrop
 from utils.renderer import Renderer
 import config
 import constants
 
-# parser = argparse.ArgumentParser()
-# parser.add_argument('--checkpoint', required=True, help='Path to pretrained checkpoint')
-# parser.add_argument('--img', type=str, help='Path to input image')
-# parser.add_argument('--bbox', type=str, default=None, help='Path to .json file containing bounding box coordinates')
-# parser.add_argument('--openpose', type=str, default=None, help='Path to .json containing openpose detections')
-# parser.add_argument('--outfile', type=str, default=None, help='Filename of output images. If not set use input filename.')
+parser = argparse.ArgumentParser()
+parser.add_argument('--checkpoint', default="data/model_checkpoint.pt", help='Path to pretrained checkpoint')
+
 
 def bbox_from_openpose(openpose_file, rescale=1.2, detection_thresh=0.2):
     """Get center and scale for bounding box from openpose detections."""
@@ -72,25 +68,16 @@ def bbox_from_json(bbox_file):
     # make sure the bounding box is rectangular
     return center, scale
 
-def bbox_to_center_scale(bbox):
-    """Get center and scale of bounding box from bounding box annotations.
-    The expected format is [top_left(x), top_left(y), width, height].
-    """
-    bbox = np.array(bbox).astype(np.float32)
-    ul_corner = bbox[:2]
-    center = ul_corner + 0.5 * bbox[2:]
-    width = max(bbox[2], bbox[3])
-    scale = width / 200.0
-    # make sure the bounding box is rectangular
-    return center, scale
 
-def process_image(img_file, bbox_file, openpose_file=None, input_res=224):
+
+def process_image(img_file, bbox_file, openpose_file, input_res=224):
     """Read image, do preprocessing and possibly crop it according to the bounding box.
     If there are bounding box annotations, use them to crop the image.
     If no bounding box is specified but openpose detections are available, use them to get the bounding box.
     """
     normalize_img = Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
     img = cv2.imread(img_file)[:,:,::-1].copy() # PyTorch does not support negative stride at the moment
+    # img (H,W,RGB)
     if bbox_file is None and openpose_file is None:
         # Assume that the person is centerered in the image
         height = img.shape[0]
@@ -98,38 +85,64 @@ def process_image(img_file, bbox_file, openpose_file=None, input_res=224):
         center = np.array([width // 2, height // 2])
         scale = max(height, width) / 200
     else:
-        # if bbox_file is not None:
-        #     center, scale = bbox_from_json(bbox_file)
         if bbox_file is not None:
-            center, scale = bbox_from_xylist(bbox_file)
+            center, scale = bbox_from_json(bbox_file)
         elif openpose_file is not None:
             center, scale = bbox_from_openpose(openpose_file)
     img = crop(img, center, scale, (input_res, input_res))
     img = img.astype(np.float32) / 255.
     img = torch.from_numpy(img).permute(2,0,1)
+    # img(RGB,H,W)
     norm_img = normalize_img(img.clone())[None]
     return img, norm_img
 
-def process_image_with_bbox(img, bbox, input_res=224):
-    """According to the bbox to crop the image
+def process_MOT_image(img, bbox, input_res=224):
+    """Read image, do preprocessing and possibly crop it according to the bounding box.
+    If there are bounding box annotations, use them to crop the image.
+    If no bounding box is specified but openpose detections are available, use them to get the bounding box.
     """
     normalize_img = Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
-    # img = cv2.imread(img_file)[:,:,::-1].copy() # PyTorch does not support negative stride at the moment
-    center, scale = bbox_to_center_scale(bbox)
+    # img (H,W,RGB)
+
+
+    ul_corner = bbox[:2]
+    center = ul_corner + 0.5 * bbox[2:]
+    width = max(bbox[2], bbox[3])
+    scale = width / 200.0
     img = crop(img, center, scale, (input_res, input_res))
     img = img.astype(np.float32) / 255.
     img = torch.from_numpy(img).permute(2,0,1)
+    # img(RGB,H,W)
     norm_img = normalize_img(img.clone())[None]
     return img, norm_img
 
-if __name__ == '__main__':
 
-    checkpoint_file = "data/model_checkpoint.pt"
+import sys
+sys.path.append("/project/tracking_wo_bnw/src")
+from tracktor.datasets.factory import Datasets
+import os.path as osp
+
+def read_from_MOT():
+    dataset = "mot17_train_FRCNN17"
+    detections = "FRCNN"
+    for db in Datasets(dataset):
+        for frame,v in enumerate(db,1):
+            im_path = v['img_path']
+            im_name = osp.basename(im_path)
+            # im_output = osp.join(output_dir, im_name)
+            im = cv2.imread(im_path)
+            im = im[:, :, (2, 1, 0)]    
+            dets = v['dets'].cpu().numpy()
+            return im, dets
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+    
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    dataset_root = "/project/lighttrack/data/Data_2018/posetrack_data"
+    
     # Load pretrained model
     model = hmr(config.SMPL_MEAN_PARAMS).to(device)
-    checkpoint = torch.load(checkpoint_file)
+    checkpoint = torch.load(args.checkpoint)
     model.load_state_dict(checkpoint['model'], strict=False)
 
     # Load SMPL model
@@ -142,60 +155,36 @@ if __name__ == '__main__':
     renderer = Renderer(focal_length=constants.FOCAL_LENGTH, img_res=constants.IMG_RES, faces=smpl.faces)
 
 
-    from collections import namedtuple
-    from posetrack_json import *
-
-    global bbox_thresh
-    bbox_thresh = 0.4
-
-    # per det_file_path is an video
-    for det_file_path in tqdm(det_file_paths):
-        precomputed_dets = load_gt_dets_mot(det_file_path) # Get frames
-        num_imgs = len(precomputed_dets)
-        img_id = -1
-        while img_id < num_imgs-1:
-            img_id += 1
-            gt_data = precomputed_dets[img_id] # per frame
-            if gt_data == []:
-                continue
-            else:
-                img_path = osp.join(dataset_root,gt_data[0]["imgpath"])
-                img = cv2.imread(img_path)[:,:,::-1].copy() # PyTorch does not support negative stride at the moment
-
-                bbox_list = [det['bbox'] for det in gt_data] # Get bbox
-                for idx, bbox in enumerate(bbox_list):
-                    if bbox[2] <= 0 or bbox[3] <= 0 or bbox[2] > 2000 or bbox[3] > 2000:
-                        bbox = [0, 0, 2, 2]
-                        continue
-
-                    # Preprocess input image and generate predictions
-                    crop_img, norm_img = process_image_with_bbox(img, bbox, input_res=constants.IMG_RES)
-                    with torch.no_grad():
-                        pred_rotmat, pred_betas, pred_camera = model(norm_img.to(device))
-                        precomputed_dets[img_id][idx]['pred_rotmat'] = pred_rotmat.cpu().numpy().tolist()
-                        precomputed_dets[img_id][idx]['pred_betas'] = pred_betas.cpu().numpy().tolist()
-                        precomputed_dets[img_id][idx]['pred_camera'] = pred_camera.cpu().numpy().tolist()
-
-        write_json_to_file(precomputed_dets,det_file_path.replace('annotations_openSVAI','annotations_CPN_format'))
-            
+    # Preprocess input image and generate predictions
+    img, dets = read_from_MOT()
+    dets[:,2:4] -= dets[:,0:2]# point-point to point-size
+    bbox = dets[4]
+    img, norm_img = process_MOT_image(img,bbox, input_res=constants.IMG_RES)
+    with torch.no_grad():
+        pred_rotmat, pred_betas, pred_camera = model(norm_img.to(device))
+        pred_output = smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
+        pred_vertices = pred_output.vertices
+        
+    # Calculate camera parameters for rendering
+    camera_translation = torch.stack([pred_camera[:,1], pred_camera[:,2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:,0] +1e-9)],dim=-1)
+    camera_translation = camera_translation[0].cpu().numpy()
+    pred_vertices = pred_vertices[0].cpu().numpy()
+    img = img.permute(1,2,0).cpu().numpy()
 
     
+    # Render parametric shape
+    img_shape = renderer(pred_vertices, camera_translation, img)
+    
+    # Render side views
+    aroundy = cv2.Rodrigues(np.array([0, np.radians(90.), 0]))[0]
+    center = pred_vertices.mean(axis=0)
+    rot_vertices = np.dot((pred_vertices - center), aroundy) + center
+    
+    # Render non-parametric shape
+    img_shape_side = renderer(rot_vertices, camera_translation, np.ones_like(img))
 
+    outfile = "mot"
 
-                    ## visuliazetion
-
-                    #     pred_output = smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
-                    #     pred_vertices = pred_output.vertices
-                    # # Calculate camera parameters for rendering
-                    # camera_translation = torch.stack([pred_camera[:,1], pred_camera[:,2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:,0] +1e-9)],dim=-1)
-                    # camera_translation = camera_translation[0].cpu().numpy()
-                    # pred_vertices = pred_vertices[0].cpu().numpy()
-                    # crop_img = crop_img.permute(1,2,0).cpu().numpy()
-
-                    
-                    # # Render parametric shape
-                    # img_shape = renderer(pred_vertices, camera_translation, crop_img)
-                    # outfile = osp.basename(img_path).split('.')[0] 
-
-                    # # Save reconstructions
-                    # cv2.imwrite(outfile + '_shape.png', 255 * img_shape[:,:,::-1])
+    # Save reconstructions
+    cv2.imwrite(outfile + '_shape.png', 255 * img_shape[:,:,::-1])
+    cv2.imwrite(outfile + '_shape_side.png', 255 * img_shape_side[:,:,::-1])
